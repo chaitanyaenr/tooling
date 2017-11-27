@@ -36,6 +36,20 @@ function pod_status_check() {
 	done
 }
 
+# cleanup
+function cleanup() {
+        oc delete -f openshift_templates/performance_monitoring/pbench/pbench-agent-daemonset.yml
+	# sleep for 20 seconds for the pods to get terminated
+	echo "Waiting for 20 seconds for the pods to get terminated" 
+	sleep 20
+}
+
+# Create a service account and add it to the privileged scc
+function create_service_account() {
+        oc create serviceaccount useroot
+        oc adm policy add-scc-to-user privileged -z useroot
+}
+
 # get the jump host, collectd credentials
 # Check for credentials as environment variables
 if [[ -z $GRAPHITE_HOST ]]; then
@@ -51,15 +65,11 @@ if [[ -z $COLLECTD_INTERVAL ]]; then
 	exit 1
 if
 	
-# Create a service account and add it to the privileged scc
-function create_service_account() {
-	oc create serviceaccount useroot
-	oc adm policy add-scc-to-user privileged -z useroot
-}
+pushd /root/svt
 
 # Setup collecd in collectd namespace
-pushd /root/svt
-oc create project collectd
+oc new-project collectd
+create_service_account
 
 # Set the variables in configmap
 sed -i "/host/c \  Host \"${GRAPHITE_HOST}\"" openshift_templates/performance_monitoring/collectd/collectd-config.yml
@@ -75,7 +85,9 @@ oc patch daemonset collectd --patch \ '{"spec":{"template":{"spec":{"serviceAcco
 
 
 # Setup pbench-agent in pbench namespace
-oc create project pbench
+oc new-project pbench
+create_service_account
+
 # Create pbench-agent pods and patch it
 oc create -f openshift_templates/performance_monitoring/pbench/pbench-agent-daemonset.yml
 oc patch daemonset pbench-agent --patch \ '{"spec":{"template":{"spec":{"serviceAccountName": "useroot"}}}}'
